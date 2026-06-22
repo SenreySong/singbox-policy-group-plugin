@@ -1,19 +1,66 @@
 const DATA_DIR = 'data/third/policy-group-manager'
 const CONFIG_FILE = DATA_DIR + '/settings.json'
+const DEFAULT_OTHER_GROUP_TAG = '🌐 Other Group'
+const DEFAULT_GROUPS = [
+  {
+    id: 'group-hk',
+    enabled: true,
+    tag: '🇭🇰 HK Group',
+    name: '香港',
+    pattern: '(?:🇭🇰|(?:^|[^A-Z])HK\\d*|Hong\\s*Kong|HongKong|香港)',
+    extraPattern: ''
+  },
+  {
+    id: 'group-tw',
+    enabled: true,
+    tag: '🇹🇼 TW Group',
+    name: '台湾',
+    pattern: '(?:🇹🇼|(?:^|[^A-Z])TW\\d*|Taiwan|台湾|台灣)',
+    extraPattern: 'CN2|CFT'
+  },
+  {
+    id: 'group-jp',
+    enabled: true,
+    tag: '🇯🇵 JP Group',
+    name: '日本',
+    pattern: '(?:🇯🇵|(?:^|[^A-Z])JP\\d*|Japan|日本)',
+    extraPattern: ''
+  },
+  {
+    id: 'group-us',
+    enabled: true,
+    tag: '🇺🇸 US Group',
+    name: '美国',
+    pattern: '(?:🇺🇸|(?:^|[^A-Z])US\\d*|United\\s*States|America|美国|美國)',
+    extraPattern: ''
+  },
+  {
+    id: 'group-au',
+    enabled: true,
+    tag: '🇦🇺 AU Group',
+    name: '澳大利亚',
+    pattern: '(?:🇦🇺|(?:^|[^A-Z])AU\\d*|Australia|澳大利亚|澳洲)',
+    extraPattern: ''
+  },
+  {
+    id: 'group-de',
+    enabled: true,
+    tag: '🇩🇪 DE Group',
+    name: '德国',
+    pattern: '(?:🇩🇪|(?:^|[^A-Z])DE\\d*|Germany|德国|德國)',
+    extraPattern: ''
+  }
+]
 const DEFAULT_SETTINGS = {
   enabled: true,
   insertPosition: 'before',
   skipHiddenSelectors: true,
-  taiwanPattern: 'CN2|CFT'
+  otherGroupEnabled: true,
+  otherGroupTag: DEFAULT_OTHER_GROUP_TAG,
+  groups: DEFAULT_GROUPS,
+  managedGroupTags: DEFAULT_GROUPS.map((group) => group.tag).concat(DEFAULT_OTHER_GROUP_TAG)
 }
-const COUNTRY_GROUPS = [
-  { tag: '🇭🇰 HK Group', code: 'HK', name: '香港', regex: /(?:🇭🇰|(?:^|[^A-Z])HK\d*|Hong\s*Kong|HongKong|香港)/i },
-  { tag: '🇹🇼 TW Group', code: 'TW', name: '台湾', regex: /(?:🇹🇼|(?:^|[^A-Z])TW\d*|Taiwan|台湾|台灣)/i, extraPatternKey: 'taiwanPattern' },
-  { tag: '🇯🇵 JP Group', code: 'JP', name: '日本', regex: /(?:🇯🇵|(?:^|[^A-Z])JP\d*|Japan|日本)/i },
-  { tag: '🇺🇸 US Group', code: 'US', name: '美国', regex: /(?:🇺🇸|(?:^|[^A-Z])US\d*|United\s*States|America|美国|美國)/i },
-  { tag: '🇦🇺 AU Group', code: 'AU', name: '澳大利亚', regex: /(?:🇦🇺|(?:^|[^A-Z])AU\d*|Australia|澳大利亚|澳洲)/i },
-  { tag: '🇩🇪 DE Group', code: 'DE', name: '德国', regex: /(?:🇩🇪|(?:^|[^A-Z])DE\d*|Germany|德国|德國)/i }
-]
+const BASE_MANAGED_GROUP_TAGS = new Set(DEFAULT_GROUPS.map((group) => group.tag).concat(DEFAULT_OTHER_GROUP_TAG))
 const EXCLUDED_TYPES = new Set(['selector', 'urltest', 'direct', 'block', 'dns'])
 
 window[Plugin.id] = window[Plugin.id] || {
@@ -37,13 +84,67 @@ const ensureDataFile = async () => {
 
 const normalizeSettings = (settings) => {
   const insertPosition = settings?.insertPosition === 'after' ? 'after' : 'before'
+  const groups = Array.isArray(settings?.groups) && settings.groups.length > 0
+    ? settings.groups
+    : migrateLegacyGroups(settings)
   return {
     enabled: settings?.enabled !== false,
     insertPosition,
     skipHiddenSelectors: settings?.skipHiddenSelectors !== false,
-    taiwanPattern: String(settings?.taiwanPattern || DEFAULT_SETTINGS.taiwanPattern).trim()
+    otherGroupEnabled: settings?.otherGroupEnabled !== false,
+    otherGroupTag: String(settings?.otherGroupTag || DEFAULT_OTHER_GROUP_TAG).trim(),
+    groups: normalizeGroupRules(groups),
+    managedGroupTags: normalizeManagedGroupTags(settings, groups)
   }
 }
+
+const normalizeManagedGroupTags = (settings, groups) => {
+  return unique(
+    []
+      .concat(Array.isArray(settings?.managedGroupTags) ? settings.managedGroupTags : [])
+      .concat(Array.from(BASE_MANAGED_GROUP_TAGS))
+      .concat((groups || []).map((group) => group?.tag))
+      .concat(settings?.otherGroupTag || DEFAULT_OTHER_GROUP_TAG)
+      .map((tag) => String(tag || '').trim())
+  )
+}
+
+const migrateLegacyGroups = (settings) => {
+  const taiwanPattern = String(settings?.taiwanPattern || '').trim()
+  return clone(DEFAULT_GROUPS).map((group) => {
+    if (group.id === 'group-tw' && taiwanPattern) {
+      return {
+        ...group,
+        extraPattern: taiwanPattern
+      }
+    }
+    return group
+  })
+}
+
+const normalizeGroupRules = (groups) => {
+  const seenIds = new Set()
+  const seenTags = new Set()
+  return (Array.isArray(groups) ? groups : [])
+    .map((group) => ({
+      id: String(group?.id || Plugins.sampleID()),
+      enabled: group?.enabled !== false,
+      tag: String(group?.tag || '').trim(),
+      name: String(group?.name || '').trim(),
+      pattern: String(group?.pattern || '').trim(),
+      extraPattern: String(group?.extraPattern || '').trim()
+    }))
+    .filter((group) => {
+      if (!group.tag || !group.pattern) return false
+      if (seenIds.has(group.id)) return false
+      if (seenTags.has(group.tag)) return false
+      seenIds.add(group.id)
+      seenTags.add(group.tag)
+      return true
+    })
+}
+
+const clone = (value) => JSON.parse(JSON.stringify(value))
 
 const readSettings = async () => {
   await ensureDataFile()
@@ -86,45 +187,87 @@ const onBeforeCoreStart = async (config, profile) => {
 }
 
 const applyPolicyGroups = (config, profile, settings) => {
-  const generatedGroupTags = new Set(COUNTRY_GROUPS.map((group) => group.tag))
+  const normalizedSettings = normalizeSettings(settings)
   const nodes = config.outbounds.filter(isRealNode)
-  const countrySelectors = []
-
-  for (const group of COUNTRY_GROUPS) {
-    const matchedNodes = nodes
-      .filter((node) => matchCountryGroup(node.tag, group, settings))
-      .map((node) => node.tag)
-
-    if (matchedNodes.length === 0) continue
-    countrySelectors.push({
-      type: 'selector',
-      tag: group.tag,
-      outbounds: unique(matchedNodes),
-      interrupt_exist_connections: false
-    })
+  const realNodeTags = new Set(nodes.map((node) => node.tag))
+  const groupRules = normalizedSettings.groups
+    .filter((group) => group.enabled)
+    .filter((group) => !realNodeTags.has(group.tag))
+  const effectiveSettings = {
+    ...normalizedSettings,
+    otherGroupEnabled: normalizedSettings.otherGroupEnabled && !realNodeTags.has(normalizedSettings.otherGroupTag)
   }
+  const generatedGroupTags = getManagedGroupTags(normalizedSettings)
+  realNodeTags.forEach((tag) => generatedGroupTags.delete(tag))
+  const { selectors, matchedNodeTags } = buildGroupSelectors(nodes, groupRules, effectiveSettings)
+  const availableGroupTags = selectors.map((group) => group.tag)
 
-  const availableGroupTags = countrySelectors.map((group) => group.tag)
   config.outbounds = config.outbounds.filter((outbound) => !generatedGroupTags.has(outbound.tag))
-  config.outbounds.unshift(...countrySelectors)
+  config.outbounds.unshift(...selectors)
 
   const hiddenSelectorTags = getHiddenSelectorTags(profile)
-  for (const selector of config.outbounds.filter((outbound) => shouldPatchSelector(outbound, generatedGroupTags, hiddenSelectorTags, settings))) {
+  for (const selector of config.outbounds.filter((outbound) => shouldPatchSelector(outbound, generatedGroupTags, hiddenSelectorTags, effectiveSettings))) {
     const retainedOutbounds = (selector.outbounds || []).filter((tag) => !generatedGroupTags.has(tag))
-    selector.outbounds = settings.insertPosition === 'after'
+    selector.outbounds = normalizedSettings.insertPosition === 'after'
       ? unique([...retainedOutbounds, ...availableGroupTags])
       : unique([...availableGroupTags, ...retainedOutbounds])
   }
 
   cleanupMissingSelectorReferences(config)
+  return { selectors, matchedNodeTags }
 }
 
-const matchCountryGroup = (tag, group, settings) => {
-  if (!group.regex.test(tag)) return false
-  if (!group.extraPatternKey) return true
-  const pattern = String(settings[group.extraPatternKey] || '').trim()
-  if (!pattern) return true
-  return safeRegexTest(pattern, tag)
+const buildGroupSelectors = (nodes, groupRules, settings) => {
+  const groupedNodeTags = new Map(groupRules.map((group) => [group.tag, []]))
+  const matchedNodeTags = new Set()
+  const groupTags = new Set(groupRules.map((group) => group.tag))
+
+  for (const node of nodes) {
+    const matchedGroup = groupRules.find((group) => matchGroupRule(node.tag, group))
+    if (!matchedGroup) continue
+    groupedNodeTags.get(matchedGroup.tag).push(node.tag)
+    matchedNodeTags.add(node.tag)
+  }
+
+  const selectors = groupRules.flatMap((group) => {
+    const outbounds = unique(groupedNodeTags.get(group.tag) || [])
+    if (outbounds.length === 0) return []
+    return [buildSelector(group.tag, outbounds)]
+  })
+
+  if (settings.otherGroupEnabled && settings.otherGroupTag && !groupTags.has(settings.otherGroupTag)) {
+    const otherNodes = nodes
+      .filter((node) => !matchedNodeTags.has(node.tag))
+      .map((node) => node.tag)
+    if (otherNodes.length > 0) {
+      selectors.push(buildSelector(settings.otherGroupTag, otherNodes))
+    }
+  }
+
+  return { selectors, matchedNodeTags }
+}
+
+const buildSelector = (tag, outbounds) => ({
+  type: 'selector',
+  tag,
+  outbounds: unique(outbounds),
+  interrupt_exist_connections: false
+})
+
+const matchGroupRule = (tag, group) => {
+  if (!safeRegexTest(group.pattern, tag)) return false
+  if (!group.extraPattern) return true
+  return safeRegexTest(group.extraPattern, tag)
+}
+
+const getManagedGroupTags = (settings) => {
+  return new Set(
+    Array.from(BASE_MANAGED_GROUP_TAGS)
+      .concat(settings.managedGroupTags || [])
+      .concat((settings.groups || []).map((group) => group.tag))
+      .concat(settings.otherGroupTag || [])
+      .filter(Boolean)
+  )
 }
 
 const isRealNode = (outbound) => {
@@ -199,7 +342,7 @@ const buildPreview = async (settings) => {
 
   const previewConfig = JSON.parse(JSON.stringify(generatedConfig))
   applyPolicyGroups(previewConfig, profile, settings)
-  const generatedGroupTags = new Set(COUNTRY_GROUPS.map((group) => group.tag))
+  const generatedGroupTags = getManagedGroupTags(settings)
   return {
     profileName: profile.name || '',
     groups: previewConfig.outbounds
@@ -248,8 +391,43 @@ const openManager = async () => {
           <div class="font-bold text-13">跳过隐藏策略组</div>
           <Switch v-model="settings.skipHiddenSelectors">跳过</Switch>
 
-          <div class="font-bold text-13">台湾节点额外条件</div>
-          <Input v-model="settings.taiwanPattern" placeholder="CN2|CFT" allow-paste />
+          <div class="font-bold text-13">启用 Other 组</div>
+          <Switch v-model="settings.otherGroupEnabled">启用</Switch>
+
+          <div class="font-bold text-13">Other 组名称</div>
+          <Input v-model="settings.otherGroupTag" placeholder="🌐 Other Group" allow-paste />
+        </div>
+      </Card>
+
+      <Card>
+        <div class="flex items-center justify-between gap-8 mb-8">
+          <div class="min-w-0">
+            <div class="font-bold text-13">分组规则</div>
+            <div class="text-12 opacity-70">节点按规则顺序匹配，命中第一条后进入对应策略组；未命中的节点进入 Other 组。</div>
+          </div>
+          <Button @click="addGroup">新增分组</Button>
+        </div>
+        <div class="flex flex-col gap-8" style="max-height: 360px; overflow: auto;">
+          <div
+            v-for="(group, index) in settings.groups"
+            :key="group.id"
+            class="grid items-center gap-8 rounded-4 p-8"
+            style="grid-template-columns: 70px minmax(100px, 140px) minmax(160px, 1fr) minmax(220px, 1.4fr) minmax(150px, 1fr) 136px; border: 1px solid #cbd5e1; background: #f8fafc;"
+          >
+            <Switch v-model="group.enabled">启用</Switch>
+            <Input v-model="group.name" placeholder="名称" allow-paste />
+            <Input v-model="group.tag" placeholder="策略组 tag" allow-paste />
+            <Input v-model="group.pattern" placeholder="主匹配正则" allow-paste />
+            <Input v-model="group.extraPattern" placeholder="额外条件正则，可空" allow-paste />
+            <div class="flex gap-4 justify-end">
+              <Button @click="moveGroupUp(index)" :disabled="index === 0">上移</Button>
+              <Button @click="moveGroupDown(index)" :disabled="index === settings.groups.length - 1">下移</Button>
+              <Button type="text" @click="removeGroup(index)">删除</Button>
+            </div>
+          </div>
+          <div v-if="settings.groups.length === 0" class="flex items-center justify-center min-h-[96px] border border-dashed rounded-4">
+            <div class="text-12 opacity-70">暂无分组规则</div>
+          </div>
         </div>
       </Card>
 
@@ -272,6 +450,29 @@ const openManager = async () => {
     </div>
     `,
     setup() {
+      const addGroup = () => {
+        settings.value.groups.push({
+          id: Plugins.sampleID(),
+          enabled: true,
+          tag: '',
+          name: '',
+          pattern: '',
+          extraPattern: ''
+        })
+      }
+      const removeGroup = (index) => {
+        settings.value.groups.splice(index, 1)
+      }
+      const moveGroupUp = (index) => {
+        if (index <= 0) return
+        const item = settings.value.groups.splice(index, 1)[0]
+        settings.value.groups.splice(index - 1, 0, item)
+      }
+      const moveGroupDown = (index) => {
+        if (index >= settings.value.groups.length - 1) return
+        const item = settings.value.groups.splice(index, 1)[0]
+        settings.value.groups.splice(index + 1, 0, item)
+      }
       const save = async () => {
         const normalized = normalizeSettings(settings.value)
         validateSettings(normalized)
@@ -288,6 +489,10 @@ const openManager = async () => {
         previewText: Vue.computed(() => preview.value.profileName ? `预览配置：${preview.value.profileName}` : '未找到可预览配置'),
         targetSelectorText: Vue.computed(() => preview.value.targetSelectors.join('、') || '无'),
         refreshPreview,
+        addGroup,
+        removeGroup,
+        moveGroupUp,
+        moveGroupDown,
         save
       }
     }
@@ -312,11 +517,27 @@ const openManager = async () => {
 }
 
 const validateSettings = (settings) => {
-  if (!settings.taiwanPattern) return
-  try {
-    new RegExp(settings.taiwanPattern)
-  } catch (error) {
-    throw `台湾节点额外条件正则无效：${error.message || error}`
+  if (settings.otherGroupEnabled && !settings.otherGroupTag) {
+    throw 'Other 组名称不能为空'
+  }
+
+  const tags = new Set()
+  for (const group of settings.groups) {
+    if (tags.has(group.tag)) {
+      throw `策略组 tag 重复：${group.tag}`
+    }
+    tags.add(group.tag)
+    try {
+      new RegExp(group.pattern)
+    } catch (error) {
+      throw `分组「${group.name || group.tag}」主匹配正则无效：${error.message || error}`
+    }
+    if (!group.extraPattern) continue
+    try {
+      new RegExp(group.extraPattern)
+    } catch (error) {
+      throw `分组「${group.name || group.tag}」额外条件正则无效：${error.message || error}`
+    }
   }
 }
 
