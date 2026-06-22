@@ -231,10 +231,11 @@ const buildGroupSelectors = (nodes, groupRules, settings) => {
   const groupTags = new Set(groupRules.map((group) => group.tag))
 
   for (const node of nodes) {
-    const matchedGroup = groupRules.find((group) => matchGroupRule(node.tag, group))
+    const matchedGroup = groupRules.find((group) => matchGroupPattern(node.tag, group))
     if (!matchedGroup) continue
-    groupedNodeTags.get(matchedGroup.tag).push(node.tag)
     matchedNodeTags.add(node.tag)
+    if (!matchGroupExtraPattern(node.tag, matchedGroup)) continue
+    groupedNodeTags.get(matchedGroup.tag).push(node.tag)
   }
 
   const selectors = groupRules.flatMap((group) => {
@@ -263,7 +264,12 @@ const buildSelector = (tag, outbounds) => ({
 })
 
 const matchGroupRule = (tag, group) => {
-  if (!safeRegexTest(group.pattern, tag)) return false
+  return matchGroupPattern(tag, group) && matchGroupExtraPattern(tag, group)
+}
+
+const matchGroupPattern = (tag, group) => safeRegexTest(group.pattern, tag)
+
+const matchGroupExtraPattern = (tag, group) => {
   if (!group.extraPattern) return true
   return safeRegexTest(group.extraPattern, tag)
 }
@@ -411,7 +417,7 @@ const openManager = async () => {
         <div class="flex items-center justify-between gap-8 mb-8">
           <div class="min-w-0">
             <div class="font-bold text-13">分组规则</div>
-            <div class="text-12 opacity-70">节点按规则顺序匹配，命中第一条后进入对应策略组；未命中的节点进入 Other 组。</div>
+            <div class="text-12 opacity-70">节点按规则顺序匹配，主规则识别后不会进入 Other 组；额外条件只决定是否进入对应策略组。</div>
           </div>
           <Button @click="addGroup">新增分组</Button>
         </div>
