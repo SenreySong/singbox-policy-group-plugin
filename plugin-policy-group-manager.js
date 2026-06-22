@@ -63,12 +63,20 @@ const DEFAULT_SETTINGS = {
 const BASE_MANAGED_GROUP_TAGS = new Set(DEFAULT_GROUPS.map((group) => group.tag).concat(DEFAULT_OTHER_GROUP_TAG))
 const EXCLUDED_TYPES = new Set(['selector', 'urltest', 'direct', 'block', 'dns'])
 
-window[Plugin.id] = window[Plugin.id] || {
-  settings: Vue.ref({ ...DEFAULT_SETTINGS }),
-  loaded: false
+const initState = () => {
+  window[Plugin.id] = window[Plugin.id] || {}
+  if (!window[Plugin.id].settings) {
+    window[Plugin.id].settings = Vue.ref({ ...DEFAULT_SETTINGS })
+  }
+  if (typeof window[Plugin.id].loaded !== 'boolean') {
+    window[Plugin.id].loaded = false
+  }
+  return window[Plugin.id]
 }
 
-const getState = () => window[Plugin.id]
+initState()
+
+const getState = () => initState()
 
 const ensureDataFile = async () => {
   if (!(await Plugins.FileExists('data/third').catch(() => false))) {
